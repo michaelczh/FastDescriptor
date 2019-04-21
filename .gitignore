@@ -1,0 +1,9 @@
+CMakeFiles
+Build
+OutputData/*
+TestData
+data
+.vs
+.idea/
+cmake-build-debug/
+config.yaml
