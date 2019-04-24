@@ -4,6 +4,6 @@ OutputData/*
 TestData
 data
 .vs
-.idea/
-cmake-build-debug/
+.idea
+cmake-build-*/
 config.yaml
