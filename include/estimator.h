@@ -78,12 +78,14 @@ public:
         Eigen::Matrix4d T = Eigen::Matrix4d::Identity();
         T << R(0,0), R(0,1), R(0,2), t(0),
              R(1,0), R(1,1), R(1,2), t(1),
-             R(2,0), R(2,1), R(2,2), t(2);
+             R(2,0), R(2,1), R(2,2), t(2),
+             0, 0, 0, 1;
 		return T;
 	}
 
 	// return T and num of matched pts
     static pair<Eigen::Matrix4d, int> RANSAC(const vector<Eigen::Vector3d>& src, const vector<Eigen::Vector3d>& dst, double threshold) {
+        //cout << src.size() << " " << dst.size() << endl;
         assert(src.size() == dst.size());
         // initializations
         int N = src.size();

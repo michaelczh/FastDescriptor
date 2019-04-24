@@ -2,9 +2,16 @@ cmake_minimum_required(VERSION 3.13)
 project(FastDesp)
 set( CMAKE_BUILD_TYPE Release )
 set( CMAKE_CXX_FLAGS "-std=c++11 -O3" )
-
+set( SOURCE_FILES main.cpp)
 include_directories(include/)
 include_directories(src/)
+
+FIND_PACKAGE( OpenMP REQUIRED)
+if(OPENMP_FOUND)
+    message("OPENMP FOUND")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${OpenMP_CXX_FLAGS}")
+endif()
+
 
 add_library(${PROJECT_NAME} SHARED src/TrimmedICP.cpp)
 

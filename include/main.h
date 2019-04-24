@@ -6,7 +6,9 @@
 #define FASTDESP_MAIN_H
 
 #include <iostream>
+#include <unordered_map>
 #include <vector>
+#include <chrono>
 #include <pcl/point_types.h>
 #include <pcl/io/pcd_io.h>
 #include <pcl/io/ply_io.h>
@@ -57,9 +59,19 @@ struct Desp{
 struct Match{
     Desp* src;
     Desp* tar;
+    Match(Desp* s, Desp* t) : src(s), tar(t){};
 };
-
-std::vector<std::string> split(const std::string& s, char delimiter);
+std::vector<std::string> split(const std::string& s, char delimiter)
+{
+    std::vector<std::string> tokens;
+    std::string token;
+    std::istringstream tokenStream(s);
+    while (std::getline(tokenStream, token, delimiter))
+    {
+        tokens.push_back(token);
+    }
+    return tokens;
+}
 void loadPointCloudData(string filePath, PointCloudT::Ptr output);
 void uniformDownSample(PointCloudT::Ptr input, float Rho, PointCloudT::Ptr output);
 void computeDescriptor(PointCloudT::Ptr seed, PointCloudT::Ptr source,
@@ -70,9 +82,14 @@ void trimmedICP(PointCloudT::Ptr tarEst, PointCloudT::Ptr tarData, float overlap
 void estimateRigidTransform(const vector<Match>& matches, const vector<Desp>& srcDesps, const vector<Desp>& tarDesps, Matrix4d & T, float &err);
 
 Eigen::Matrix4d matching(vector<Desp>& srcDesps, vector<Desp>& tarDesps);
-double diffOfS(vector<Vector3f> srcS, vector<Vector3f> tarS);
-
 float computeDespDist(Desp& src, Desp& tar);
 void computeNormalDiff(Desp& seed, vector<Desp>& allDesps, vector<vector<float>>& res);
 void aggMatching(Desp& src, vector<Desp>& srcSeeds, Desp& tar, vector<Desp>& tarSeeds, vector<Match>& matches);
+void flannSearch(const vector<Desp>& srcDesps, const vector<Desp>& tarDesps, unordered_map<int,pair<int,float>>& map);
+void flannSearch(const vector<Eigen::Vector3d>& srcDesps, const vector<Eigen::Vector3d>& tarDesps, unordered_map<int,pair<int,float>>& map);
+void flannSearch(const vector<float>& src, const vector<float>& tar, float radius, vector<vector<int>>& map);
+float timeElapsed(std::chrono::steady_clock::time_point start){
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start);
+    return (float)duration.count() / 1000;
+}
 #endif //FASTDESP_MAIN_H
