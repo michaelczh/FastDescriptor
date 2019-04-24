@@ -78,9 +78,8 @@ void computeDescriptor(PointCloudT::Ptr seed, PointCloudT::Ptr source,
                        float radiusMin, float radiusMax, float radiusStep, vector<Desp>& desps);
 void svdCov(PointCloudT::Ptr input, PointT seed, vector<int> &othersIdx, Vector3f& s, Vector3f& n);
 
-void trimmedICP(PointCloudT::Ptr tarEst, PointCloudT::Ptr tarData, float overlapRatio);
 void estimateRigidTransform(const vector<Match>& matches, const vector<Desp>& srcDesps, const vector<Desp>& tarDesps, Matrix4d & T, float &err);
-
+void estimateRigidTransform(const vector<Eigen::Vector3d>& src, const vector<Eigen::Vector3d>& tar, Matrix4d & T, float &err);
 Eigen::Matrix4d matching(vector<Desp>& srcDesps, vector<Desp>& tarDesps);
 float computeDespDist(Desp& src, Desp& tar);
 void computeNormalDiff(Desp& seed, vector<Desp>& allDesps, vector<vector<float>>& res);
@@ -88,6 +87,9 @@ void aggMatching(Desp& src, vector<Desp>& srcSeeds, Desp& tar, vector<Desp>& tar
 void flannSearch(const vector<Desp>& srcDesps, const vector<Desp>& tarDesps, unordered_map<int,pair<int,float>>& map);
 void flannSearch(const vector<Eigen::Vector3d>& srcDesps, const vector<Eigen::Vector3d>& tarDesps, unordered_map<int,pair<int,float>>& map);
 void flannSearch(const vector<float>& src, const vector<float>& tar, float radius, vector<vector<int>>& map);
+void trimmedICP(const vector<Eigen::Vector3d> &tarEst, const vector<Eigen::Vector3d> &tarData, float overlapRatio);
+
+
 float timeElapsed(std::chrono::steady_clock::time_point start){
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start);
     return (float)duration.count() / 1000;

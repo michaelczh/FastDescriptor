@@ -75,16 +75,20 @@ int main() {
     cout << "[Time_matching]  " << Time_matching <<  " s | " << Time_matching/Time_total*100 << "%\n";
 
 
-    PointCloudT::Ptr src_hat = PointCloudT::Ptr(new PointCloudT);
+    vector<Eigen::Vector3d> tar_hat;
     for (auto &p : source->points) {
         Eigen::Vector4d tmp(p.x, p.y, p.z, 1);
         tmp = bestT * tmp;
-        PointT tmpP;
-        tmpP.x = tmp(0); tmpP.y = tmp(1); tmpP.z = tmp(2);
-        src_hat->push_back(tmpP);
+        tar_hat.push_back(Eigen::Vector3d(tmp(0), tmp(1), tmp(2)));
     }
-    viewer.addPointCloud(src_hat, Color::RED);
+    viewer.addPointCloud(tar_hat, Color::RED);
     viewer.spin();
+
+    vector<Eigen::Vector3d> tar;
+    for (auto&p : target->points) {
+        tar.push_back(Eigen::Vector3d(p.x, p.y, p.z));
+    }
+    trimmedICP(tar_hat, tar, Config<float>("overlapRatio"));
 
     return 0;
 }
@@ -131,6 +135,8 @@ void loadPointCloudData(string filePath, PointCloudT::Ptr output){
             output->push_back(p);
         }
     }
+
+
 }
 
 void uniformDownSample(PointCloudT::Ptr input, float Rho, PointCloudT::Ptr output){
@@ -224,36 +230,6 @@ void svdCov(PointCloudT::Ptr input, PointT seed, vector<int> &othersIdx, Vector3
 //                           to_string(n(0))   + " " + to_string(n(1))   + " " + to_string(n(2)));
 }
 
-void trimmedICP(PointCloudT::Ptr tarEst, PointCloudT::Ptr tarData, float overlapRatio){
-    typedef pair<pair<int,int>, float> PAIR;
-    KdTreeFLANN<PointT> kdtree;
-    kdtree.setInputCloud (tarData);
-    auto cmp = [](const PAIR &a, const PAIR &b) {
-        return  a.second < b.second;
-    };
-    priority_queue<PAIR, vector<PAIR>, decltype( cmp ) > pq(cmp);
-
-    int num = overlapRatio * tarData->size();
-    for (int i = 0; i < tarEst->size(); ++i) {
-        PointT searchPoint = tarEst->points[i];
-        vector<int> pointIdxNKNSearch;
-        vector<float> pointNKNSquaredDistance;
-        if ( kdtree.nearestKSearch (searchPoint, 1, pointIdxNKNSearch, pointNKNSquaredDistance) > 0 ) {
-            //unordered_map[i] = pointIdxNKNSearch[0];
-            pair<pair<int,int>, float> pair;
-            pair.first.first = i;
-            pair.first.second = pointIdxNKNSearch[0];
-            pair.second = pointNKNSquaredDistance[0];
-            if (pq.size() < num) pq.push(pair);
-            else if(pq.top().second > pointNKNSquaredDistance[0]) {
-                pq.pop();
-                pq.push(pair);
-            }
-        }
-    }
-
-}
-
 void estimateRigidTransform(const vector<Match>& matches, const vector<Desp>& srcDesps, const vector<Desp>& tarDesps, Matrix4d & T, float &err) {
 
     //cout << "[estimateRigidTransform]" << endl;
@@ -294,6 +270,44 @@ void estimateRigidTransform(const vector<Match>& matches, const vector<Desp>& sr
     }
     unordered_map<int,pair<int,float>> map;
     flannSearch(transSrc, tar_v, map);
+
+    priority_queue<float> pq;
+    for (auto& it : map) {
+        pq.push(it.second.second);
+        if (pq.size() > ovNum) pq.pop();
+    }
+    err = 0;
+    while(!pq.empty()) {
+        err += pq.top();
+        pq.pop();
+    }
+}
+
+void estimateRigidTransform(const vector<Eigen::Vector3d>& src, const vector<Eigen::Vector3d>& tar, Matrix4d & T, float &err) {
+
+    auto start = std::chrono::steady_clock::now();
+    int ovNum = tar.size() * Config<float>("overlapRatio");
+
+
+    float ransacThr = Config<float>("GridStep") * Config<float>("GridStep");
+    pair<Eigen::Matrix4d, int> estRes = Estimator::RANSAC(src, tar, ransacThr);
+    if (estRes.second < 3) {
+        err = INT_MAX;
+        T = Eigen::Matrix4d::Identity();
+        return;
+    }
+    Eigen::Matrix4d estimateT = estRes.first;
+    T = estimateT;
+
+
+    vector<Eigen::Vector3d> transSrc;
+    for (auto& p : src) {
+        Eigen::Vector4d tmp = estimateT * Eigen::Vector4d(p(0), p(1), p(2), 1);
+        transSrc.push_back(Eigen::Vector3d(tmp(0), tmp(1), tmp(2)));
+    }
+
+    unordered_map<int,pair<int,float>> map;
+    flannSearch(transSrc, tar, map);
 
     priority_queue<float> pq;
     for (auto& it : map) {
@@ -587,4 +601,76 @@ void flannSearch(const vector<float>& src, const vector<float>& tar, float radiu
             }
         }
     }
+}
+
+void trimmedICP(const vector<Eigen::Vector3d> &tarEst, const vector<Eigen::Vector3d> &tarData, float overlapRatio){
+    int ovNum = overlapRatio * tarData.size();
+    typedef pair<pair<int,int>, float> PAIR;
+    struct Compare {
+        bool operator() (PAIR& p1, PAIR& p2) {return p1.second < p2.second;}
+    };
+
+    unordered_map<int,pair<int,float>> map;
+    flannSearch(tarEst, tarData, map);
+    priority_queue<PAIR, vector<PAIR>, Compare> pq;
+    for (auto& it:map) {
+        pq.push(make_pair( make_pair(it.first,it.second.first), it.second.second));
+        if (pq.size() > ovNum) pq.pop();
+    }
+
+    int matIter = 100; float dE = INT_MAX; int iter = 0;
+    float errThr = 1e-4; float rmseThr = 0.001;
+    vector<float> rmsE(matIter+1, 0);
+
+    vector<Eigen::Vector3d> match_srcData;
+    vector<Eigen::Vector3d> match_tarData;
+    int testIdx = 0;
+    while(!pq.empty()) {
+        PAIR tmp = pq.top();
+        pq.pop();
+        if (testIdx++ < 10) cout << tmp.second << endl;
+        match_tarData.push_back(tarData[tmp.first.first]);
+        match_srcData.push_back(tarEst[tmp.first.second]);
+        rmsE[0] += tmp.second;
+    }
+
+    rmsE[0] = sqrt (rmsE[0] / ovNum);
+    cout << rmsE[0] << endl;
+    while(dE > errThr && iter < maxIter && rmsE[iter] > rmseThr) {
+        iter++;
+        Eigen::Matrix4d T;
+        float err;
+        estimateRigidTransform(match_tarData, match_srcData, T, err);
+        vector<Eigen::Vector3d> tar_hat;
+        for (auto& src : match_srcData) {
+            Eigen::Vector4d tmp = T * Eigen::Vector4d(src(0),src(1),src(2),1);
+            tar_hat.push_back(Eigen::Vector3d(tmp(0), tmp(1), tmp(2)));
+        }
+
+        // search nearest point
+        unordered_map<int,pair<int,float>> map;
+        flannSearch(tar_hat, match_tarData, map);
+        priority_queue<PAIR, vector<PAIR>, Compare> pq;
+        for (auto& it:map) {
+            pq.push(make_pair( make_pair(it.first,it.second.first), it.second.second));
+            if (pq.size() > ovNum) pq.pop();
+        }
+
+        float thisErr = 0;
+        vector<Eigen::Vector3d> new_match_srcData;
+        vector<Eigen::Vector3d> new_match_tarData;
+        while (!pq.empty()) {
+            PAIR tmp = pq.top();
+            pq.pop();
+            thisErr += tmp.second;
+            new_match_tarData.push_back(match_tarData[tmp.first.first]);
+            new_match_srcData.push_back(match_srcData[tmp.first.second]);
+        }
+        thisErr = thisErr / ovNum;
+        rmsE[iter] = sqrt(thisErr);
+        dE = rmsE[iter-1] - rmsE[iter];
+    }
+
+    cout << "[trimmed-icp] " << iter << endl;
+
 }
