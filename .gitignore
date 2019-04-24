@@ -5,5 +5,5 @@ TestData
 data
 .vs
 .idea
-cmake-build-debug/
+cmake-build-*/
 config.yaml
