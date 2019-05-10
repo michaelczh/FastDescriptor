@@ -52,6 +52,9 @@ target_link_libraries (test ${PROJECT_NAME})
 add_executable(runGTest UnitTest/test.cpp)
 target_link_libraries(runGTest gtest gtest_main)
 target_link_libraries(runGTest ${PROJECT_NAME})
+
+add_executable(viewResult src/viewResult.cpp)
+target_link_libraries(viewResult ${PROJECT_NAME})
 #[[
 
 add_executable(extractWall extract_walls.cpp)

@@ -99,6 +99,22 @@ public:
     }
 
     template<typename T>
+    void addPointCloud(const T &cloud, int size = 1 ) {
+        PointCloudRGB::Ptr tmp(new PointCloudRGB);
+        for(auto& p : cloud->points) {
+            PointRGB tmpP;
+            tmpP.x = p.x;
+            tmpP.y = p.y;
+            tmpP.z = p.z;
+            tmpP.rgba = p.rgba;
+            tmp->push_back(tmpP);
+        }
+        viewer->addPointCloud(tmp, to_string(lineIdx));
+        viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, size, to_string(lineIdx++));
+        viewer->spin();
+    }
+
+    template<typename T>
     void addPointCloud(const vector<T> pts, Color color, int size = 1 ) {
         PointCloudRGB::Ptr tmp(new PointCloudRGB);
         uint32_t colorInt = getColorValue(color);
