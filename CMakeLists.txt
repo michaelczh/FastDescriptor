@@ -49,9 +49,14 @@ target_link_libraries (main ${PROJECT_NAME})
 add_executable(test src/estTest.cpp)
 target_link_libraries (test ${PROJECT_NAME})
 
+add_executable(ResultVisual src/ResultVisual.cpp)
+target_link_libraries (ResultVisual ${PROJECT_NAME})
+
 add_executable(runGTest UnitTest/test.cpp)
 target_link_libraries(runGTest gtest gtest_main)
 target_link_libraries(runGTest ${PROJECT_NAME})
+
+add_executable(lineTest src/lineTest.cpp)
 #[[
 
 add_executable(extractWall extract_walls.cpp)

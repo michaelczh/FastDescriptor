@@ -115,9 +115,44 @@ public:
         viewer->spin();
     }
 
+    template<typename T>
+    void addPointCloud(const T &cloud, int size = 1 ) {
+        PointCloudRGB::Ptr tmp(new PointCloudRGB);
+        for(auto& p : cloud->points) {
+            PointRGB tmpP;
+            tmpP.x = p.x;
+            tmpP.y = p.y;
+            tmpP.z = p.z;
+            tmpP.rgba = p.rgba;
+            tmp->push_back(tmpP);
+        }
+        viewer->addPointCloud(tmp, to_string(lineIdx));
+        viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, size, to_string(lineIdx++));
+        viewer->spin();
+    }
     void addMatching(Desp& d1, Desp& d2) {
         viewer->addLine(d1.seed,d2.seed, 255,0,0, to_string(lineIdx++));
         //viewer->spin();
+    }
+
+    void addMatching(Desp& d1, Desp& d2, Color color) {
+        uint32_t colorValue = getColorValue(color);
+        double r =  colorValue >> 16 & 255;
+        double g =  colorValue >> 8 & 255;
+        double b =  colorValue & 255;
+        viewer->addLine(d1.seed,d2.seed, r,g,b, to_string(lineIdx++));
+    }
+
+    void addMatching(PointCloudT::Ptr d1, PointCloudT::Ptr d2, Color color) {
+        if (d1->size() != d2->size()) cerr << "error size different " << endl;
+        int n = d1->size();
+        uint32_t colorValue = getColorValue(color);
+        double r =  colorValue >> 16 & 255;
+        double g =  colorValue >> 8 & 255;
+        double b =  colorValue & 255;
+        for (int i = 0; i < n; ++i) {
+            viewer->addLine(d1->points[i],d2->points[i], r,g,b, to_string(lineIdx++));
+        }
     }
 
     void spin() {viewer->spin();}

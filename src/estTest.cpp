@@ -1,49 +1,44 @@
+#include <gtest/gtest.h>
+#include <pcl/pcl_tests.h>
+
+#include <pcl/io/pcd_io.h>
+#include <pcl/io/ply_io.h>
+#include <pcl/keypoints/iss_3d.h>
+#include "SimpleView.h"
+
+using namespace pcl;
+using namespace pcl::io;
+
 //
-// Created by czh on 4/15/19.
+// Main variables
 //
 
-//using Eigen's SVD to fastly compute the rigid transformation between two point clouds.
-#include <iostream>
-#include <ctime>
-
-#include <Eigen/SVD>
-#include <Eigen/Dense>
-#include <Eigen/Sparse>
-#include <Eigen/Geometry>
-#include "estimator.h"
-#include <flann/flann.hpp>
-#include <omp.h>
-#include <chrono>
-#include <unordered_map>
-#include <stack>
-using namespace flann;
-
-float timeElapsed(std::chrono::steady_clock::time_point start){
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start);
-    return (float)duration.count() / 1000;
-}
-
-int main(int argc, char** argv)
-{
-    int nn = 1000;
-    unordered_map<int,int> map;
-    for (int i = 0; i < nn; i++) map[i] = i;
+SimpleView viewer("view");
 
 
-    for (int j = 0; j < 10; ++j ) {
-        int minN = INT_MAX;
-        #pragma omp parallel for
-        for (int i = 0; i < nn; ++i) {
-            if (map[i] < minN) minN = map[i];
-        }
-        cout << minN << endl;
-    }
+int main(){
+        PointCloud<PointXYZ>::Ptr keypoints(new PointCloud<PointXYZ>());
+        PointCloud<PointXYZ>::Ptr cloud (new PointCloud<PointXYZ> ());
+        pcl::io::loadPLYFile <PointXYZ>("../data/1/1.ply", *cloud);
+        search::KdTree<PointXYZ>::Ptr tree (new search::KdTree<PointXYZ> ());
+        //
+        // Compute the ISS 3D keypoints - Without Boundary Estimation
+        //
+        ISSKeypoint3D<PointXYZ, PointXYZ> iss_detector;
+        iss_detector.setSearchMethod (tree);
+        iss_detector.setSalientRadius (10*0.01);
+        iss_detector.setNonMaxRadius (2*0.01);
 
+        iss_detector.setThreshold21 (0.975);
+        iss_detector.setThreshold32 (0.975);
+        iss_detector.setMinNeighbors (5);
+        iss_detector.setNumberOfThreads (1);
+        iss_detector.setInputCloud (cloud);
+        iss_detector.compute (*keypoints);
 
-
-
-
-
-}
-
-
+        cout << "num of pts " << keypoints->size() << endl;
+        viewer.addPointCloud(cloud, RED, 1);
+        viewer.addPointCloud(keypoints, YELLOW, 5);
+        viewer.spin();
+        return 0;
+};
