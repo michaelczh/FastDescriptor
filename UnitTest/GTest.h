@@ -6,7 +6,7 @@
 #define FASTDESP_TEST_H
 
 
-class test {
+class GTest {
 
 };
 

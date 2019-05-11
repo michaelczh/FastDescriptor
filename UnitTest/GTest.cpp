@@ -4,7 +4,7 @@
 
 #include <iostream>
 #include "gtest/gtest.h"
-#include "test.h"
+#include "GTest.h"
 #include "estimator.h"
 #include <ctime>
 
@@ -12,6 +12,7 @@
 #include <Eigen/Dense>
 #include <Eigen/Sparse>
 #include <Eigen/Geometry>
+#include <DebugExporter.h>
 
 using namespace Eigen;
 using namespace std;
@@ -105,6 +106,14 @@ TEST(ESTIMATOR, RANSAC) {
         EXPECT_LE((RT.second-trans_hat).sum(), 0.01) << RT.second << "\n" << trans_hat << endl;
 
     }
+}
+
+TEST(DEBUGEXPORTER, EXISTING) {
+    DebugFileExporter exporter("/.textDebug");
+    exporter.insertLine("111");
+    exporter.insertLine("222");
+    exporter.exportToPath();
+
 }
 
 int main(int argc, char* argv[]){
