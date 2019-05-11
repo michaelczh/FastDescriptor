@@ -74,6 +74,16 @@ int main() {
     cout << "[Time_computeDesp]  " << Time_computeDesp <<  " s | " << Time_computeDesp/Time_total*100 << "%\n";
     cout << "[Time_matching]  " << Time_matching <<  " s | " << Time_matching/Time_total*100 << "%\n";
 
+    DebugFileExporter resultExporter("../data/ALL_Result.txt");
+    resultExporter.insertLine("srcPath: " + sourcePath);
+    resultExporter.insertLine("tarPath: " + targetPath);
+    resultExporter.insertLine("srcSeed: " + to_string(sourceDesp.size()));
+    resultExporter.insertLine("tarSeed: " + to_string(targetDesp.size()));
+    resultExporter.insertLine("Time: " + to_string(Time_total));
+    std::stringstream bestTss; bestTss << bestT;
+    resultExporter.insertLine("Best T:\n" + bestTss.str());
+    resultExporter.insertLine("");
+    resultExporter.exportToPath();
 
     vector<Eigen::Vector3d> tar_hat;
     for (auto &p : source->points) {
