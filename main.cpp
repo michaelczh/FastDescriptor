@@ -36,8 +36,8 @@ int main() {
     config = YAML::LoadFile(configPath);
     string sourcePath = Config<std::string>("srcPath");
     string targetPath = Config<std::string>("tarPath");
-
-
+    cout << "Input src: " << sourcePath << "\n";
+    cout << "Input tar: " << targetPath << "\n";
     PointCloudT::Ptr source(new PointCloudT); PointCloudT::Ptr sourceSeed(new PointCloudT);
     PointCloudT::Ptr target(new PointCloudT); PointCloudT::Ptr targetSeed(new PointCloudT);
     loadPointCloudData(sourcePath, source);
@@ -74,7 +74,7 @@ int main() {
     cout << "[Time_computeDesp]  " << Time_computeDesp <<  " s | " << Time_computeDesp/Time_total*100 << "%\n";
     cout << "[Time_matching]  " << Time_matching <<  " s | " << Time_matching/Time_total*100 << "%\n";
 
-    DebugFileExporter resultExporter("../data/ALL_Result.txt");
+    DebugFileExporter resultExporter("../data/ALL_Result.txt", false);
     resultExporter.insertLine("srcPath: " + sourcePath);
     resultExporter.insertLine("tarPath: " + targetPath);
     resultExporter.insertLine("srcSeed: " + to_string(sourceDesp.size()));
