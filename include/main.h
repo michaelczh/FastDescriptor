@@ -90,6 +90,7 @@ void flannSearch(const vector<float>& src, const vector<float>& tar, float radiu
 void trimmedICP(const vector<Eigen::Vector3d> &tarEst, const vector<Eigen::Vector3d> &tarData, float overlapRatio);
 void extractFeaturePts(PointCloudT::Ptr input, PointCloudT::Ptr output);
 void rotatePointCloud(PointCloudT::Ptr input, const Eigen::Matrix4d &T);
+void extractFeaturePts_Harris3D(PointCloudT::Ptr input, PointCloudT::Ptr output);
 
 float timeElapsed(std::chrono::steady_clock::time_point start){
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start);

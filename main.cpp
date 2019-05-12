@@ -16,6 +16,7 @@
 #include <pcl/registration/correspondence_rejection_trimmed.h>
 #include <pcl/registration/transformation_estimation_svd.h>
 #include <pcl/keypoints/iss_3d.h>
+#include <pcl/keypoints/harris_3d.h>
 #include <flann/flann.hpp>
 #include <queue>
 #include "main.h"
@@ -45,23 +46,24 @@ int main() {
     loadPointCloudData(targetPath, target);
 
     auto start = std::chrono::steady_clock::now();
+    Eigen::Matrix4d T;
+    T << -0.212562 , 0.0549092 , 0.975604,-0.271187
+            , -0.0128927 , 0.998175 , -0.0589887 , 0.166816
+            , 0.977062 ,0.0251169 , 0.211466 , -0.35044
+            , 0 , 0 , 0 , 1;
+    rotatePointCloud(source,T);
     uniformDownSample(source, Config<float>("Downsample","Rho"), sourceSeed);
     uniformDownSample(target, Config<float>("Downsample","Rho"), targetSeed);
 
     PointCloudT::Ptr sourceFeature(new PointCloudT); PointCloudT::Ptr targetFeature(new PointCloudT);
-    Eigen::Matrix4d T;
-    T << -0.212562 , 0.0549092 , 0.975604,-0.271187
-                      , -0.0128927 , 0.998175 , -0.0589887 , 0.166816
-                      , 0.977062 ,0.0251169 , 0.211466 , -0.35044
-            , 0 , 0 , 0 , 1;
-    rotatePointCloud(source,T);
+
     extractFeaturePts(source, sourceFeature);
     extractFeaturePts(target, targetFeature);
     SimpleView viewer_Key("key points");
     viewer_Key.addPointCloud(source, RED, 1);
-    viewer_Key.addPointCloud(sourceFeature, YELLOW, 5);
+    viewer_Key.addPointCloud(sourceSeed, YELLOW, 5);
     viewer_Key.addPointCloud(target, GREEN, 1);
-    viewer_Key.addPointCloud(targetFeature, BLUE, 5);
+    viewer_Key.addPointCloud(targetSeed, BLUE, 5);
     viewer_Key.spin();
 
     Time_downsample = timeElapsed(start);
@@ -220,6 +222,34 @@ void extractFeaturePts(PointCloudT::Ptr input, PointCloudT::Ptr output){
     }
 
     cout << " num of key points " << output->size() << endl;
+}
+
+
+void extractFeaturePts_Harris3D(PointCloudT::Ptr input, PointCloudT::Ptr output){
+    pcl::HarrisKeypoint3D<pcl::PointXYZ,pcl::PointXYZI> detector;
+    detector.setNonMaxSupression (true);
+    detector.setRadius (Config<float>("Harris3D","radius"));
+    detector.setThreshold (1e-6);
+    //detector.setRadiusSearch (100);
+    pcl::PointCloud<pcl::PointXYZ>::Ptr pc(new pcl::PointCloud<pcl::PointXYZ>);
+    for (auto& p : input->points) pc->push_back( pcl::PointXYZ(p.x,p.y,p.z) );
+
+    detector.setInputCloud(pc);
+
+    pcl::PointCloud<pcl::PointXYZI>::Ptr keypoints(new pcl::PointCloud<pcl::PointXYZI>());
+    detector.compute(*keypoints);
+
+    std::cout << "keypoints detected: " << keypoints->size() << std::endl;
+
+
+    pcl::PointIndicesConstPtr keypoints_indices = detector.getKeypointsIndices ();
+    for (auto& idx : keypoints_indices->indices) {
+        PointT p;
+        p.x = pc->points[idx].x;
+        p.y = pc->points[idx].y;
+        p.z = pc->points[idx].z;
+        output->push_back(p);
+    }
 }
 
 void computeDescriptor(PointCloudT::Ptr seed, PointCloudT::Ptr source, float radiusMin, float radiusMax, float radiusStep, vector<Desp>& desps){
