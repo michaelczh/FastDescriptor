@@ -88,8 +88,22 @@ void flannSearch(const vector<Desp>& srcDesps, const vector<Desp>& tarDesps, uno
 void flannSearch(const vector<Eigen::Vector3d>& srcDesps, const vector<Eigen::Vector3d>& tarDesps, unordered_map<int,pair<int,float>>& map);
 void flannSearch(const vector<float>& src, const vector<float>& tar, float radius, vector<vector<int>>& map);
 void trimmedICP(const vector<Eigen::Vector3d> &tarEst, const vector<Eigen::Vector3d> &tarData, float overlapRatio);
+
+
+void trimmedICP(PointCloudT::Ptr tarEst, PointCloudT::Ptr tarData, float overlapRatio){
+    vector<Eigen::Vector3d> _tarData, _tarEst;
+    for (auto&p : tarData->points) {
+        _tarData.push_back(Eigen::Vector3d(p.x, p.y, p.z));
+    }
+
+    for (auto&p : tarEst->points) {
+        _tarEst.push_back(Eigen::Vector3d(p.x, p.y, p.z));
+    }
+
+    trimmedICP(_tarEst, _tarData, overlapRatio);
+
+};
 void extractFeaturePts(PointCloudT::Ptr input, PointCloudT::Ptr output);
-void rotatePointCloud(PointCloudT::Ptr input, const Eigen::Matrix4d &T);
 void extractFeaturePts_Harris3D(PointCloudT::Ptr input, PointCloudT::Ptr output);
 
 float timeElapsed(std::chrono::steady_clock::time_point start){

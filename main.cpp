@@ -46,12 +46,6 @@ int main() {
     loadPointCloudData(targetPath, target);
 
     auto start = std::chrono::steady_clock::now();
-    Eigen::Matrix4d T;
-    T << -0.212562 , 0.0549092 , 0.975604,-0.271187
-            , -0.0128927 , 0.998175 , -0.0589887 , 0.166816
-            , 0.977062 ,0.0251169 , 0.211466 , -0.35044
-            , 0 , 0 , 0 , 1;
-    rotatePointCloud(source,T);
     uniformDownSample(source, Config<float>("Downsample","Rho"), sourceSeed);
     uniformDownSample(target, Config<float>("Downsample","Rho"), targetSeed);
 
@@ -59,12 +53,6 @@ int main() {
 
     extractFeaturePts(source, sourceFeature);
     extractFeaturePts(target, targetFeature);
-    SimpleView viewer_Key("key points");
-    viewer_Key.addPointCloud(source, RED, 1);
-    viewer_Key.addPointCloud(sourceSeed, YELLOW, 5);
-    viewer_Key.addPointCloud(target, GREEN, 1);
-    viewer_Key.addPointCloud(targetSeed, BLUE, 5);
-    viewer_Key.spin();
 
     Time_downsample = timeElapsed(start);
     if (Config<bool>("Visualization","showInput")) {
@@ -113,22 +101,12 @@ int main() {
     resultExporter.insertLine("");
     resultExporter.exportToPath();
 
-    vector<Eigen::Vector3d> tar_hat;
-    for (auto &p : source->points) {
-        Eigen::Vector4d tmp(p.x, p.y, p.z, 1);
-        tmp = bestT * tmp;
-        tar_hat.push_back(Eigen::Vector3d(tmp(0), tmp(1), tmp(2)));
-    }
-    if (Config<bool>("Visualization","showFinalResult")) viewer.addPointCloud(tar_hat, Color::RED);
+    PointCloudT::Ptr tarEst(new PointCloudT);
+    pcl::transformPointCloud(*source, *tarEst, bestT);
 
-    viewer.spin();
+    if (Config<bool>("Visualization","showFinalResult")) viewer.addPointCloud(tarEst, Color::RED);
 
-    vector<Eigen::Vector3d> tar;
-    for (auto&p : target->points) {
-        tar.push_back(Eigen::Vector3d(p.x, p.y, p.z));
-    }
-
-    trimmedICP(tar_hat, tar, Config<float>("overlapRatio"));
+    trimmedICP(tarEst, target, Config<float>("overlapRatio"));
 
     return 0;
 }
@@ -822,15 +800,4 @@ void trimmedICP(const vector<Eigen::Vector3d> &tarEst, const vector<Eigen::Vecto
 
     cout << "[trimmed-icp] " << iter << endl;
 
-}
-
-void rotatePointCloud(PointCloudT::Ptr input, const Eigen::Matrix4d &T) {
-
-    for (auto& p : input->points) {
-        Eigen::Vector4d v(p.x,p.y,p.z,1);
-        Eigen::Vector4d v_T = T * v;
-        p.x = v_T(0);
-        p.y = v_T(1);
-        p.z = v_T(2);
-    }
 }
