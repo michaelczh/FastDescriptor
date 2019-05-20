@@ -73,7 +73,6 @@ std::vector<std::string> split(const std::string& s, char delimiter)
     return tokens;
 }
 void loadPointCloudData(string filePath, PointCloudT::Ptr output);
-void uniformDownSample(PointCloudT::Ptr input, float Rho, PointCloudT::Ptr output);
 void computeDescriptor(PointCloudT::Ptr seed, PointCloudT::Ptr source,
                        float radiusMin, float radiusMax, float radiusStep, vector<Desp>& desps);
 void svdCov(PointCloudT::Ptr input, PointT seed, vector<int> &othersIdx, Vector3f& s, Vector3f& n);
@@ -103,8 +102,6 @@ void trimmedICP(PointCloudT::Ptr tarEst, PointCloudT::Ptr tarData, float overlap
     trimmedICP(_tarEst, _tarData, overlapRatio);
 
 };
-void extractFeaturePts(PointCloudT::Ptr input, PointCloudT::Ptr output);
-void extractFeaturePts_Harris3D(PointCloudT::Ptr input, PointCloudT::Ptr output);
 
 float timeElapsed(std::chrono::steady_clock::time_point start){
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start);

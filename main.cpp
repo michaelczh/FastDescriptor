@@ -23,6 +23,7 @@
 #include "SimpleView.h"
 #include "estimator.h"
 #include "DebugExporter.h"
+#include "ComputeFeatures.h"
 #include <omp.h>
 using namespace pcl;
 using namespace std;
@@ -46,13 +47,8 @@ int main() {
     loadPointCloudData(targetPath, target);
 
     auto start = std::chrono::steady_clock::now();
-    uniformDownSample(source, Config<float>("Downsample","Rho"), sourceSeed);
-    uniformDownSample(target, Config<float>("Downsample","Rho"), targetSeed);
-
-    PointCloudT::Ptr sourceFeature(new PointCloudT); PointCloudT::Ptr targetFeature(new PointCloudT);
-
-    extractFeaturePts(source, sourceFeature);
-    extractFeaturePts(target, targetFeature);
+    ComputeFeatures::UniformDownSample(source, sourceSeed, Config<float>("Downsample","Rho"));
+    ComputeFeatures::UniformDownSample(target, targetSeed, Config<float>("Downsample","Rho"));
 
     Time_downsample = timeElapsed(start);
     if (Config<bool>("Visualization","showInput")) {
@@ -67,19 +63,16 @@ int main() {
     float radiusMin  = Config<float>("Radii", "min") *Config<float>("GridStep");
     float radiusStep = Config<float>("Radii", "step")*Config<float>("GridStep");
     float radiusMax  = Config<float>("Radii", "max") *Config<float>("GridStep");
-    vector<Desp> sourceDesp, targetDesp, srcFDesp, tarFDesp;
+    vector<Desp> sourceDesp, targetDesp;
 
     start = std::chrono::steady_clock::now();
     computeDescriptor(sourceSeed, source, radiusMin, radiusMax, radiusStep, sourceDesp);
     computeDescriptor(targetSeed, target, radiusMin, radiusMax, radiusStep, targetDesp);
-    computeDescriptor(sourceFeature, source, radiusMin, radiusMax, radiusStep, srcFDesp);
-    computeDescriptor(targetFeature, target, radiusMin, radiusMax, radiusStep, tarFDesp);
-
     Time_computeDesp = timeElapsed(start);
     //svdExport.exportToPath();
 
     start = std::chrono::steady_clock::now();
-    Eigen::Matrix4d bestT = matching(sourceDesp,targetDesp, srcFDesp, tarFDesp);
+    Eigen::Matrix4d bestT = matching(sourceDesp,targetDesp, sourceDesp, targetDesp);
     Time_matching = timeElapsed(start);
 
 
@@ -155,91 +148,6 @@ void loadPointCloudData(string filePath, PointCloudT::Ptr output){
     }
 
 
-}
-
-void uniformDownSample(PointCloudT::Ptr input, float Rho, PointCloudT::Ptr output){
-    int numOri = input->size();
-    assert(numOri > 0);
-    UniformSampling<PointT> filter;
-    filter.setInputCloud(input);
-    filter.setRadiusSearch(Rho);
-    filter.filter(*output);
-    cout << "[uniformDownSample] from " << numOri << " to " << output->size() << endl;
-}
-
-void extractFeaturePts(PointCloudT::Ptr input, PointCloudT::Ptr output){
-    KdTreeFLANN<PointT> kdtree;
-    kdtree.setInputCloud (input);
-
-    vector<float> weights(input->size(),0);
-    float radius = Config<float>("GridStep");
-
-    // compute weights
-    for (int i = 0; i < input->size(); ++i) {
-        PointT searchPoint = input->points[i];
-        vector<int> pointIdxRadiusSearch;
-        vector<float> pointRadiusSquaredDistance;
-        if ( kdtree.radiusSearch (searchPoint, radius, pointIdxRadiusSearch, pointRadiusSquaredDistance) > 1 )
-        {
-            weights[i] = (float)1 / (pointIdxRadiusSearch.size()-1);
-
-        }
-    }
-
-    for (int i = 0; i < input->size(); ++i) {
-        PointT searchPoint = input->points[i];
-        vector<int> pointIdxRadiusSearch;
-        vector<float> pointRadiusSquaredDistance;
-        if ( kdtree.radiusSearch (searchPoint, radius, pointIdxRadiusSearch, pointRadiusSquaredDistance) > 1 )
-        {
-            Eigen::Vector3f p_i(searchPoint.x, searchPoint.y, searchPoint.z);
-            Eigen::Matrix3f P = Eigen::Matrix3f::Zero();
-            float sumWeight = 0;
-            for (int& idx : pointIdxRadiusSearch) {
-                if (idx == i) continue;
-                Eigen::Vector3f p_j(input->points[idx].x, input->points[idx].y, input->points[idx].z);
-                Eigen::Vector3f minsV = p_j-p_i;
-                P = P + weights[idx] * minsV * minsV.transpose();
-                sumWeight += weights[idx];
-            }
-
-            P = P / sumWeight;
-            JacobiSVD<MatrixXf> svd(P, ComputeThinU |  ComputeThinV);
-            auto S = svd.singularValues();
-            if (S(0) < S(1) && S(0) < S(2) && S(1) < S(2)) cout << "errorrrrrrrr" << endl;
-            if (S(1)/S(0) <= Config<float>("ISS","Thr21") && S(2)/S(1) <= Config<float>("ISS","Thr32")) output->push_back(input->points[i]);
-        }
-    }
-
-    cout << " num of key points " << output->size() << endl;
-}
-
-
-void extractFeaturePts_Harris3D(PointCloudT::Ptr input, PointCloudT::Ptr output){
-    pcl::HarrisKeypoint3D<pcl::PointXYZ,pcl::PointXYZI> detector;
-    detector.setNonMaxSupression (true);
-    detector.setRadius (Config<float>("Harris3D","radius"));
-    detector.setThreshold (1e-6);
-    //detector.setRadiusSearch (100);
-    pcl::PointCloud<pcl::PointXYZ>::Ptr pc(new pcl::PointCloud<pcl::PointXYZ>);
-    for (auto& p : input->points) pc->push_back( pcl::PointXYZ(p.x,p.y,p.z) );
-
-    detector.setInputCloud(pc);
-
-    pcl::PointCloud<pcl::PointXYZI>::Ptr keypoints(new pcl::PointCloud<pcl::PointXYZI>());
-    detector.compute(*keypoints);
-
-    std::cout << "keypoints detected: " << keypoints->size() << std::endl;
-
-
-    pcl::PointIndicesConstPtr keypoints_indices = detector.getKeypointsIndices ();
-    for (auto& idx : keypoints_indices->indices) {
-        PointT p;
-        p.x = pc->points[idx].x;
-        p.y = pc->points[idx].y;
-        p.z = pc->points[idx].z;
-        output->push_back(p);
-    }
 }
 
 void computeDescriptor(PointCloudT::Ptr seed, PointCloudT::Ptr source, float radiusMin, float radiusMax, float radiusStep, vector<Desp>& desps){
@@ -578,7 +486,6 @@ void aggMatching(Desp& src, vector<Desp>& srcSeeds, Desp& tar, vector<Desp>& tar
 
 }
 
-
 float computeDespDist(Desp& src, Desp& tar) {
     assert(src.S.size() == tar.S.size());
     float totalDist = 0;
@@ -607,7 +514,6 @@ void computeNormalDiff(Desp& seed, vector<Desp>& allDesps, vector<vector<float>>
     }
 
 }
-
 
 void flannSearch(const vector<Desp>& srcDesps, const vector<Desp>& tarDesps, unordered_map<int,pair<int,float>>& map){
     int layer = srcDesps[0].S.size();
