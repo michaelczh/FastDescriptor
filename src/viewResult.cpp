@@ -33,6 +33,7 @@ int main(){
 
     SimpleView resultView("result");
     int numPointCloud = Ts.size();
+    PointCloudT::Ptr allPts(new PointCloudT);
     for (int i = 0; i < numPointCloud; ++i) {
         string ptsFileName = "../data/" + to_string(i+1) + "/1_rgb.ply";
         Eigen::Matrix4d T = Eigen::Matrix4d::Identity();
@@ -40,8 +41,11 @@ int main(){
         PointCloudT::Ptr cloud(new PointCloudT);
         pcl::io::loadPLYFile<PointT>(ptsFileName, *cloud);
         rotatePointCloud(cloud, T);
+        for (auto& p : cloud->points) allPts->push_back(p);
         resultView.addPointCloud(cloud);
     }
+
+    pcl::io::savePLYFile("./RegisResult.ply",*allPts);
 
     return 0;
 }

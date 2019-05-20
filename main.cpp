@@ -15,6 +15,8 @@
 #include <pcl/filters/uniform_sampling.h>
 #include <pcl/registration/correspondence_rejection_trimmed.h>
 #include <pcl/registration/transformation_estimation_svd.h>
+#include <pcl/keypoints/iss_3d.h>
+#include <pcl/keypoints/harris_3d.h>
 #include <flann/flann.hpp>
 #include <queue>
 #include "main.h"
@@ -44,26 +46,52 @@ int main() {
     loadPointCloudData(targetPath, target);
 
     auto start = std::chrono::steady_clock::now();
+    Eigen::Matrix4d T;
+    T << -0.212562 , 0.0549092 , 0.975604,-0.271187
+            , -0.0128927 , 0.998175 , -0.0589887 , 0.166816
+            , 0.977062 ,0.0251169 , 0.211466 , -0.35044
+            , 0 , 0 , 0 , 1;
+    rotatePointCloud(source,T);
     uniformDownSample(source, Config<float>("Downsample","Rho"), sourceSeed);
     uniformDownSample(target, Config<float>("Downsample","Rho"), targetSeed);
-    Time_downsample = timeElapsed(start);
 
-    viewer.addPointCloud(source, Color::GREEN);
-    viewer.addPointCloud(target, Color::BLUE);
+    PointCloudT::Ptr sourceFeature(new PointCloudT); PointCloudT::Ptr targetFeature(new PointCloudT);
+
+    extractFeaturePts(source, sourceFeature);
+    extractFeaturePts(target, targetFeature);
+    SimpleView viewer_Key("key points");
+    viewer_Key.addPointCloud(source, RED, 1);
+    viewer_Key.addPointCloud(sourceSeed, YELLOW, 5);
+    viewer_Key.addPointCloud(target, GREEN, 1);
+    viewer_Key.addPointCloud(targetSeed, BLUE, 5);
+    viewer_Key.spin();
+
+    Time_downsample = timeElapsed(start);
+    if (Config<bool>("Visualization","showInput")) {
+        viewer.addPointCloud(source, Color::GREEN);
+        viewer.addPointCloud(target, Color::BLUE);
+    }else{
+        viewer.addPointCloud(sourceSeed, Color::GREEN,3);
+        viewer.addPointCloud(targetSeed, Color::BLUE ,3);
+    }
+
 
     float radiusMin  = Config<float>("Radii", "min") *Config<float>("GridStep");
     float radiusStep = Config<float>("Radii", "step")*Config<float>("GridStep");
     float radiusMax  = Config<float>("Radii", "max") *Config<float>("GridStep");
-    vector<Desp> sourceDesp, targetDesp;
+    vector<Desp> sourceDesp, targetDesp, srcFDesp, tarFDesp;
 
     start = std::chrono::steady_clock::now();
     computeDescriptor(sourceSeed, source, radiusMin, radiusMax, radiusStep, sourceDesp);
     computeDescriptor(targetSeed, target, radiusMin, radiusMax, radiusStep, targetDesp);
+    computeDescriptor(sourceFeature, source, radiusMin, radiusMax, radiusStep, srcFDesp);
+    computeDescriptor(targetFeature, target, radiusMin, radiusMax, radiusStep, tarFDesp);
+
     Time_computeDesp = timeElapsed(start);
     //svdExport.exportToPath();
 
     start = std::chrono::steady_clock::now();
-    Eigen::Matrix4d bestT = matching(sourceDesp,targetDesp);
+    Eigen::Matrix4d bestT = matching(sourceDesp,targetDesp, srcFDesp, tarFDesp);
     Time_matching = timeElapsed(start);
 
 
@@ -91,13 +119,15 @@ int main() {
         tmp = bestT * tmp;
         tar_hat.push_back(Eigen::Vector3d(tmp(0), tmp(1), tmp(2)));
     }
-    viewer.addPointCloud(tar_hat, Color::RED);
+    if (Config<bool>("Visualization","showFinalResult")) viewer.addPointCloud(tar_hat, Color::RED);
+
     viewer.spin();
 
     vector<Eigen::Vector3d> tar;
     for (auto&p : target->points) {
         tar.push_back(Eigen::Vector3d(p.x, p.y, p.z));
     }
+
     trimmedICP(tar_hat, tar, Config<float>("overlapRatio"));
 
     return 0;
@@ -107,7 +137,7 @@ int main() {
 void loadPointCloudData(string filePath, PointCloudT::Ptr output){
     assert(output->size() == 0);
     stringstream ss;
-    ss << "Input File: " << filePath;
+    ss << "Input File: " << filePath << "\n";
 
     string fileType = filePath.substr(filePath.length() - 3);
     if (!(fileType == "ply" || fileType == "obj" || fileType == "txt" || fileType == "pcd"))
@@ -157,6 +187,81 @@ void uniformDownSample(PointCloudT::Ptr input, float Rho, PointCloudT::Ptr outpu
     filter.setRadiusSearch(Rho);
     filter.filter(*output);
     cout << "[uniformDownSample] from " << numOri << " to " << output->size() << endl;
+}
+
+void extractFeaturePts(PointCloudT::Ptr input, PointCloudT::Ptr output){
+    KdTreeFLANN<PointT> kdtree;
+    kdtree.setInputCloud (input);
+
+    vector<float> weights(input->size(),0);
+    float radius = Config<float>("GridStep");
+
+    // compute weights
+    for (int i = 0; i < input->size(); ++i) {
+        PointT searchPoint = input->points[i];
+        vector<int> pointIdxRadiusSearch;
+        vector<float> pointRadiusSquaredDistance;
+        if ( kdtree.radiusSearch (searchPoint, radius, pointIdxRadiusSearch, pointRadiusSquaredDistance) > 1 )
+        {
+            weights[i] = (float)1 / (pointIdxRadiusSearch.size()-1);
+
+        }
+    }
+
+    for (int i = 0; i < input->size(); ++i) {
+        PointT searchPoint = input->points[i];
+        vector<int> pointIdxRadiusSearch;
+        vector<float> pointRadiusSquaredDistance;
+        if ( kdtree.radiusSearch (searchPoint, radius, pointIdxRadiusSearch, pointRadiusSquaredDistance) > 1 )
+        {
+            Eigen::Vector3f p_i(searchPoint.x, searchPoint.y, searchPoint.z);
+            Eigen::Matrix3f P = Eigen::Matrix3f::Zero();
+            float sumWeight = 0;
+            for (int& idx : pointIdxRadiusSearch) {
+                if (idx == i) continue;
+                Eigen::Vector3f p_j(input->points[idx].x, input->points[idx].y, input->points[idx].z);
+                Eigen::Vector3f minsV = p_j-p_i;
+                P = P + weights[idx] * minsV * minsV.transpose();
+                sumWeight += weights[idx];
+            }
+
+            P = P / sumWeight;
+            JacobiSVD<MatrixXf> svd(P, ComputeThinU |  ComputeThinV);
+            auto S = svd.singularValues();
+            if (S(0) < S(1) && S(0) < S(2) && S(1) < S(2)) cout << "errorrrrrrrr" << endl;
+            if (S(1)/S(0) <= Config<float>("ISS","Thr21") && S(2)/S(1) <= Config<float>("ISS","Thr32")) output->push_back(input->points[i]);
+        }
+    }
+
+    cout << " num of key points " << output->size() << endl;
+}
+
+
+void extractFeaturePts_Harris3D(PointCloudT::Ptr input, PointCloudT::Ptr output){
+    pcl::HarrisKeypoint3D<pcl::PointXYZ,pcl::PointXYZI> detector;
+    detector.setNonMaxSupression (true);
+    detector.setRadius (Config<float>("Harris3D","radius"));
+    detector.setThreshold (1e-6);
+    //detector.setRadiusSearch (100);
+    pcl::PointCloud<pcl::PointXYZ>::Ptr pc(new pcl::PointCloud<pcl::PointXYZ>);
+    for (auto& p : input->points) pc->push_back( pcl::PointXYZ(p.x,p.y,p.z) );
+
+    detector.setInputCloud(pc);
+
+    pcl::PointCloud<pcl::PointXYZI>::Ptr keypoints(new pcl::PointCloud<pcl::PointXYZI>());
+    detector.compute(*keypoints);
+
+    std::cout << "keypoints detected: " << keypoints->size() << std::endl;
+
+
+    pcl::PointIndicesConstPtr keypoints_indices = detector.getKeypointsIndices ();
+    for (auto& idx : keypoints_indices->indices) {
+        PointT p;
+        p.x = pc->points[idx].x;
+        p.y = pc->points[idx].y;
+        p.z = pc->points[idx].z;
+        output->push_back(p);
+    }
 }
 
 void computeDescriptor(PointCloudT::Ptr seed, PointCloudT::Ptr source, float radiusMin, float radiusMax, float radiusStep, vector<Desp>& desps){
@@ -331,32 +436,40 @@ void estimateRigidTransform(const vector<Eigen::Vector3d>& src, const vector<Eig
     }
 }
 
-Eigen::Matrix4d matching(vector<Desp>& srcDesps, vector<Desp>& tarDesps) {
+Eigen::Matrix4d matching(vector<Desp>& srcDesps, vector<Desp>& tarDesps, vector<Desp>& srcFDesps, vector<Desp>& tarFDesps) {
     cout << "[matching]" << endl;
     unordered_map<int,pair<int,float>> map;
 
-    flannSearch(srcDesps, tarDesps, map);
+    flannSearch(srcFDesps, tarFDesps, map);
 
     float minErr = INT_MAX;
     Eigen::Matrix4d bestT = Eigen::Matrix4d::Identity();
-    int seedIdx = 0;
 
+
+    // pair< srcIdx, tarIdx >
     vector<pair<int,int>> rec;
     for (auto& it : map) {
         rec.push_back( make_pair(it.second.first, it.first));
     }
 
+    // visualize the initial matching
+
+    if (Config<bool>("Visualization","showInitMatch")) {
+        for (int i = 0; i < rec.size(); ++i) {
+            viewer.addMatching(srcFDesps[rec[i].first],tarFDesps[rec[i].second], RED);
+        }
+        viewer.spin();
+    }
+
+    float seedIdx = 0;
     #pragma omp parallel for
     for (int i = 0; i < rec.size(); ++i) {
         cout << "Matching " << ++seedIdx << "th seed among " << rec.size() << "\n";
-       // auto start = std::chrono::steady_clock::now();
         vector<Match> aggMatches;
-        Match match( &srcDesps[rec[i].first],&tarDesps[rec[i].second] );
+        Match match( &srcFDesps[rec[i].first],&tarFDesps[rec[i].second] );
+
         aggMatches.push_back(match);
         aggMatching(*match.src, srcDesps, *match.tar, tarDesps, aggMatches);
-        //float TimeAgg = timeElapsed(start);
-        //start = std::chrono::steady_clock::now();
-        //float TimeEstimateRigid = 0;
         if (aggMatches.size() > 10) {
            Eigen::Matrix4d thisT = Eigen::Matrix4d::Identity();
            float thisErr = INT_MAX;
@@ -375,7 +488,31 @@ Eigen::Matrix4d matching(vector<Desp>& srcDesps, vector<Desp>& tarDesps) {
 
     }
     cout << "min Err: "<< minErr << endl;
-    cout << "best T: " << bestT << endl;
+    cout << "best T:\n " << bestT << endl;
+
+    // show right init match
+    int num_usefulMatch = 0;
+    DebugFileExporter matchExport("./matchPairs.txt");
+    for (auto& it : rec) {
+        PointT src = srcDesps[it.first].seed;
+        PointT tar = tarDesps[it.second].seed;
+        Eigen::Vector4d srcV(src.x, src.y, src.z, 1);
+        Eigen::Vector4d tarV(tar.x, tar.y, tar.z, 1);
+        Eigen::Vector4d tarV_hat = bestT * srcV;
+        string s = to_string(src.x) + " " + to_string(src.y) + " " + to_string(src.z) + " " +
+                   to_string(tar.x) + " " + to_string(tar.y) + " " + to_string(tar.z) + " ";
+        float gridStep = Config<float>("GridStep");
+        if ((tarV_hat - tarV).norm() < gridStep) {
+            viewer.addMatching(srcDesps[it.first],tarDesps[it.second], YELLOW);
+            num_usefulMatch++;
+            s += '1';
+        }else{
+            s += '0';
+        }
+        matchExport.insertLine(s);
+    }
+    matchExport.exportToPath();
+    cout << "[Analysis] Total " << rec.size() << " init matches, " << num_usefulMatch << " matches contribute to estimation\n";
 
     return bestT;
 
@@ -676,6 +813,8 @@ void trimmedICP(const vector<Eigen::Vector3d> &tarEst, const vector<Eigen::Vecto
             new_match_tarData.push_back(match_tarData[tmp.first.first]);
             new_match_srcData.push_back(match_srcData[tmp.first.second]);
         }
+        match_tarData = new_match_tarData;
+        match_srcData = new_match_srcData;
         thisErr = thisErr / ovNum;
         rmsE[iter] = sqrt(thisErr);
         dE = rmsE[iter-1] - rmsE[iter];
@@ -683,4 +822,15 @@ void trimmedICP(const vector<Eigen::Vector3d> &tarEst, const vector<Eigen::Vecto
 
     cout << "[trimmed-icp] " << iter << endl;
 
+}
+
+void rotatePointCloud(PointCloudT::Ptr input, const Eigen::Matrix4d &T) {
+
+    for (auto& p : input->points) {
+        Eigen::Vector4d v(p.x,p.y,p.z,1);
+        Eigen::Vector4d v_T = T * v;
+        p.x = v_T(0);
+        p.y = v_T(1);
+        p.z = v_T(2);
+    }
 }

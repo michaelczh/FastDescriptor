@@ -61,6 +61,10 @@ target_link_libraries(viewResult ${PROJECT_NAME})
 
 add_executable(Harris3d src/harris3d.cpp)
 target_link_libraries(Harris3d ${PROJECT_NAME})
+
+add_executable(ResultVisual src/ResultVisual.cpp)
+target_link_libraries (ResultVisual ${PROJECT_NAME})
+
 #[[
 
 add_executable(extractWall extract_walls.cpp)
