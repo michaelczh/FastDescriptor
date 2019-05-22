@@ -46,9 +46,6 @@ endif()]]
 add_executable(main main.cpp)
 target_link_libraries (main ${PROJECT_NAME})
 
-add_executable(test src/estTest.cpp)
-target_link_libraries (test ${PROJECT_NAME})
-
 add_executable(runGTest UnitTest/GTest.cpp)
 target_link_libraries(runGTest gtest gtest_main)
 target_link_libraries(runGTest ${PROJECT_NAME})
@@ -58,9 +55,6 @@ target_link_libraries(TEST_DebugExporter ${PROJECT_NAME})
 
 add_executable(viewResult src/viewResult.cpp)
 target_link_libraries(viewResult ${PROJECT_NAME})
-
-add_executable(Harris3d src/harris3d.cpp)
-target_link_libraries(Harris3d ${PROJECT_NAME})
 
 add_executable(ResultVisual src/ResultVisual.cpp)
 target_link_libraries (ResultVisual ${PROJECT_NAME})
