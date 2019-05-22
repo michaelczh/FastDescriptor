@@ -13,7 +13,7 @@ if(OPENMP_FOUND)
 endif()
 
 
-add_library(${PROJECT_NAME} SHARED src/TrimmedICP.cpp)
+ADD_LIBRARY(${PROJECT_NAME} SHARED src/ComputeFeatures.cpp)
 
 # eigen
 include_directories( "/usr/include/eigen3/" )
@@ -50,7 +50,7 @@ add_executable(runGTest UnitTest/GTest.cpp)
 target_link_libraries(runGTest gtest gtest_main)
 target_link_libraries(runGTest ${PROJECT_NAME})
 
-add_executable(TEST_DebugExporter UnitTest/TestDebugExporter.cpp)
+add_executable(TEST_DebugExporter TestFile/TestDebugExporter.cpp)
 target_link_libraries(TEST_DebugExporter ${PROJECT_NAME})
 
 add_executable(viewResult src/viewResult.cpp)
