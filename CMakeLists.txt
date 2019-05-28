@@ -13,7 +13,9 @@ if(OPENMP_FOUND)
 endif()
 
 
-ADD_LIBRARY(${PROJECT_NAME} SHARED src/ComputeFeatures.cpp)
+ADD_LIBRARY(${PROJECT_NAME} SHARED
+        src/ComputeFeatures.cpp
+        src/ColorFeature.cpp)
 
 # eigen
 include_directories( "/usr/include/eigen3/" )
@@ -61,6 +63,10 @@ target_link_libraries (ResultVisual ${PROJECT_NAME})
 
 add_executable(ComputeFeatures src/ComputeFeatures.cpp)
 target_link_libraries (ComputeFeatures ${PROJECT_NAME})
+
+
+add_executable(TestSimpleView TestFile/TestSimpleView.cpp)
+target_link_libraries (TestSimpleView ${PROJECT_NAME})
 
 #[[
 

@@ -22,12 +22,10 @@
 #include <pcl/registration/correspondence_rejection_trimmed.h>
 #include <pcl/registration/transformation_estimation_svd.h>
 #include <queue>
+#include <Type.h>
 using namespace std;
 using namespace Eigen;
-typedef pcl::PointXYZRGBNormal PointT;
-typedef pcl::PointXYZRGB PointRGB;
-typedef pcl::PointCloud<PointT> PointCloudT;
-typedef pcl::PointCloud<PointRGB> PointCloudRGB;
+using namespace Type;
 
 YAML::Node config ;
 template<typename T>
@@ -43,24 +41,7 @@ T Config(string a, string b)
     return aa[b].as<T>();
 }
 
-struct Desp{
-    PointT seed;
-    vector<Vector3f> N;
-    vector<Vector3f> S;
-    bool isMatching(Desp& t){
-        assert(N.size() == t.N.size());
-        assert(S.size() == t.S.size());
-        int normalSimilarNum = 0;
 
-
-    }
-};
-
-struct Match{
-    Desp* src;
-    Desp* tar;
-    Match(Desp* s, Desp* t) : src(s), tar(t){};
-};
 std::vector<std::string> split(const std::string& s, char delimiter)
 {
     std::vector<std::string> tokens;
@@ -87,6 +68,7 @@ void flannSearch(const vector<Desp>& srcDesps, const vector<Desp>& tarDesps, uno
 void flannSearch(const vector<Eigen::Vector3d>& srcDesps, const vector<Eigen::Vector3d>& tarDesps, unordered_map<int,pair<int,float>>& map);
 void flannSearch(const vector<float>& src, const vector<float>& tar, float radius, vector<vector<int>>& map);
 void trimmedICP(const vector<Eigen::Vector3d> &tarEst, const vector<Eigen::Vector3d> &tarData, float overlapRatio);
+bool isFiltered_Color(Desp& d1, Desp& d2);
 
 
 void trimmedICP(PointCloudT::Ptr tarEst, PointCloudT::Ptr tarData, float overlapRatio){
@@ -107,4 +89,6 @@ float timeElapsed(std::chrono::steady_clock::time_point start){
     auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start);
     return (float)duration.count() / 1000;
 }
+
+void computeColorFeature(PointCloudT::Ptr seeds, PointCloudT::Ptr source);
 #endif //FASTDESP_MAIN_H

@@ -24,11 +24,12 @@
 #include "estimator.h"
 #include "DebugExporter.h"
 #include "ComputeFeatures.h"
+#include "ColorFeature.h"
 #include <omp.h>
 using namespace pcl;
 using namespace std;
 using namespace Eigen;
-SimpleView viewer("view");
+SimpleView viewer("view",1,1);
 //DebugFileExporter svdExport("./svdExport.txt");
 
 int main() {
@@ -49,7 +50,6 @@ int main() {
     auto start = std::chrono::steady_clock::now();
     ComputeFeatures::UniformDownSample(source, sourceSeed, Config<float>("Downsample","Rho"));
     ComputeFeatures::UniformDownSample(target, targetSeed, Config<float>("Downsample","Rho"));
-
     Time_downsample = timeElapsed(start);
     if (Config<bool>("Visualization","showInput")) {
         viewer.addPointCloud(source, Color::GREEN);
@@ -75,7 +75,7 @@ int main() {
     Eigen::Matrix4d bestT = matching(sourceDesp,targetDesp, sourceDesp, targetDesp);
     Time_matching = timeElapsed(start);
 
-
+    {
     cout << "======================================" << "\n";
     float Time_total = Time_downsample+Time_computeDesp+Time_matching;
     cout << "Total time " << Time_total << " s\n";
@@ -89,11 +89,12 @@ int main() {
     resultExporter.insertLine("srcSeed: " + to_string(sourceDesp.size()));
     resultExporter.insertLine("tarSeed: " + to_string(targetDesp.size()));
     resultExporter.insertLine("Time: " + to_string(Time_total));
+    resultExporter.insertLine("ColorThr: " + to_string(Config<int>("ColorFeature","filterThr")));
     std::stringstream bestTss; bestTss << bestT;
     resultExporter.insertLine("Best T:\n" + bestTss.str());
     resultExporter.insertLine("");
     resultExporter.exportToPath();
-
+    }
     PointCloudT::Ptr tarEst(new PointCloudT);
     pcl::transformPointCloud(*source, *tarEst, bestT);
 
@@ -152,6 +153,9 @@ void loadPointCloudData(string filePath, PointCloudT::Ptr output){
 
 void computeDescriptor(PointCloudT::Ptr seed, PointCloudT::Ptr source, float radiusMin, float radiusMax, float radiusStep, vector<Desp>& desps){
 
+    ColorFeature cf(seed, source, Config<float>("ColorFeature","radius"));
+    //cf.compute();
+
     KdTreeFLANN<PointT> kdtree;
     kdtree.setInputCloud (source);
     vector<int> validIndexes;
@@ -173,6 +177,13 @@ void computeDescriptor(PointCloudT::Ptr seed, PointCloudT::Ptr source, float rad
     for (int & idx: validIndexes ) {
         PointT searchPoint = seed->points[idx];
         Desp desp;
+        if (searchPoint.x != cf.meanOutput->points[idx].x
+            || searchPoint.y != cf.stdvOutput->points[idx].y
+            || searchPoint.z != cf.skewOutput->points[idx].z) cout << "[error] wrong calculate of points color feature" << endl;
+        desp.CI.mean.r = cf.meanOutput->points[idx].r; desp.CI.mean.g = cf.meanOutput->points[idx].g; desp.CI.mean.b = cf.meanOutput->points[idx].b;
+        desp.CI.stdv.r = cf.stdvOutput->points[idx].r; desp.CI.stdv.g = cf.stdvOutput->points[idx].g; desp.CI.stdv.b = cf.stdvOutput->points[idx].b;
+        desp.CI.skew.r = cf.skewOutput->points[idx].r; desp.CI.skew.g = cf.skewOutput->points[idx].g; desp.CI.skew.b = cf.skewOutput->points[idx].b;
+
         desp.seed = searchPoint;
         vector<int> pointIdxRadiusSearch;
         vector<float> pointRadiusSquaredDistance;
@@ -334,26 +345,27 @@ Eigen::Matrix4d matching(vector<Desp>& srcDesps, vector<Desp>& tarDesps, vector<
 
     // pair< srcIdx, tarIdx >
     vector<pair<int,int>> rec;
-    for (auto& it : map) {
-        rec.push_back( make_pair(it.second.first, it.first));
-    }
+    for (auto& it : map) rec.push_back( make_pair(it.second.first, it.first));
+
 
     // visualize the initial matching
-
     if (Config<bool>("Visualization","showInitMatch")) {
-        for (int i = 0; i < rec.size(); ++i) {
-            viewer.addMatching(srcFDesps[rec[i].first],tarFDesps[rec[i].second], RED);
-        }
+        for (int i = 0; i < rec.size(); ++i) viewer.addMatching(srcFDesps[rec[i].first],tarFDesps[rec[i].second], RED);
         viewer.spin();
     }
 
     float seedIdx = 0;
-    #pragma omp parallel for
+    int filteredNum = 0;
+    //#pragma omp parallel for
     for (int i = 0; i < rec.size(); ++i) {
         cout << "Matching " << ++seedIdx << "th seed among " << rec.size() << "\n";
         vector<Match> aggMatches;
-        Match match( &srcFDesps[rec[i].first],&tarFDesps[rec[i].second] );
+        if (isFiltered_Color(srcFDesps[rec[i].first],tarFDesps[rec[i].second])) {
+            filteredNum++;
+            continue;
+        }
 
+        Match match( &srcFDesps[rec[i].first],&tarFDesps[rec[i].second] );
         aggMatches.push_back(match);
         aggMatching(*match.src, srcDesps, *match.tar, tarDesps, aggMatches);
         if (aggMatches.size() > 10) {
@@ -361,7 +373,7 @@ Eigen::Matrix4d matching(vector<Desp>& srcDesps, vector<Desp>& tarDesps, vector<
            float thisErr = INT_MAX;
            estimateRigidTransform(aggMatches,srcDesps, tarDesps, thisT, thisErr);
            //TimeEstimateRigid = timeElapsed(start);
-            #pragma omp critical
+            //#pragma omp critical
             {
                 if (thisErr < minErr) {
                     minErr = thisErr;
@@ -369,12 +381,11 @@ Eigen::Matrix4d matching(vector<Desp>& srcDesps, vector<Desp>& tarDesps, vector<
                 }
             };
         }
-        //cout << "Matching " << ++seedIdx << "th seed among " << map.size() << " seeds. | Agg Time: " << TimeAgg;
-        //cout << "  estimate Rigid Time: " << TimeEstimateRigid << endl;
 
     }
     cout << "min Err: "<< minErr << endl;
     cout << "best T:\n " << bestT << endl;
+    cout << "filtered num: " << filteredNum << endl;
 
     // show right init match
     int num_usefulMatch = 0;
@@ -386,7 +397,10 @@ Eigen::Matrix4d matching(vector<Desp>& srcDesps, vector<Desp>& tarDesps, vector<
         Eigen::Vector4d tarV(tar.x, tar.y, tar.z, 1);
         Eigen::Vector4d tarV_hat = bestT * srcV;
         string s = to_string(src.x) + " " + to_string(src.y) + " " + to_string(src.z) + " " +
-                   to_string(tar.x) + " " + to_string(tar.y) + " " + to_string(tar.z) + " ";
+                   to_string(tar.x) + " " + to_string(tar.y) + " " + to_string(tar.z) + " " +
+                   srcDesps[it.first].CI.mean.to_str() + " " + srcDesps[it.first].CI.stdv.to_str() + " " + srcDesps[it.first].CI.skew.to_str() + " " +
+                   tarDesps[it.second].CI.mean.to_str() + " " + tarDesps[it.second].CI.stdv.to_str() + " " + tarDesps[it.second].CI.skew.to_str() + " ";
+
         float gridStep = Config<float>("GridStep");
         if ((tarV_hat - tarV).norm() < gridStep) {
             viewer.addMatching(srcDesps[it.first],tarDesps[it.second], YELLOW);
@@ -436,7 +450,6 @@ void aggMatching(Desp& src, vector<Desp>& srcSeeds, Desp& tar, vector<Desp>& tar
     vector<vector<float>> tarAngle;
     computeNormalDiff(src, srcSeeds, seedAngle);
     computeNormalDiff(tar, tarSeeds, tarAngle);
-
 
     struct Compare {
         bool operator() (pair<int, float>& p1, pair<int, float>& p2) {return p1.second > p2.second;}
@@ -706,4 +719,21 @@ void trimmedICP(const vector<Eigen::Vector3d> &tarEst, const vector<Eigen::Vecto
 
     cout << "[trimmed-icp] " << iter << endl;
 
+}
+
+void computeColorFeature(PointCloudT::Ptr seeds, PointCloudT::Ptr source){
+    cout << "compute color feature" << endl;
+    ColorFeature cf(seeds, source, Config<float>("ColorFeature","radius"));
+    PointCloudT::Ptr outputMean(new PointCloudT);
+    cf.compute();
+    SimpleView viewer1("Color feature",1,4);
+    viewer1.addPointCloud(seeds,1,1);
+    viewer1.addPointCloud(cf.meanOutput,1,2);
+    viewer1.addPointCloud(cf.stdvOutput,1,3);
+    viewer1.addPointCloud(cf.skewOutput,1,4);
+    cout << outputMean->size() << endl;
+}
+
+bool isFiltered_Color(Desp& d1, Desp& d2){
+    return ((d1.CI - d2.CI) > Config<int>("ColorFeature","filterThr"));
 }
