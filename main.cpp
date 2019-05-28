@@ -21,11 +21,14 @@
 #include <queue>
 #include "main.h"
 #include "SimpleView.h"
-#include "estimator.h"
+#include "Estimator.h"
 #include "DebugExporter.h"
 #include "ComputeFeatures.h"
 #include "ColorFeature.h"
+#include "FlannSearch.h"
 #include <omp.h>
+#include <main.h>
+
 using namespace pcl;
 using namespace std;
 using namespace Eigen;
@@ -152,7 +155,6 @@ void loadPointCloudData(string filePath, PointCloudT::Ptr output){
 }
 
 void computeDescriptor(PointCloudT::Ptr seed, PointCloudT::Ptr source, float radiusMin, float radiusMax, float radiusStep, vector<Desp>& desps){
-
     ColorFeature cf(seed, source, Config<float>("ColorFeature","radius"));
     //cf.compute();
 
@@ -213,8 +215,6 @@ void computeDescriptor(PointCloudT::Ptr seed, PointCloudT::Ptr source, float rad
 }
 
 void svdCov(PointCloudT::Ptr input, PointT seed, vector<int> &othersIdx, Vector3f& s, Vector3f& n) {
-
-
     MatrixXf C = MatrixXf::Zero(3,3);
     PointT seedP = seed;
     Vector3f x_i(seedP.x, seedP.y, seedP.z);
@@ -242,106 +242,17 @@ void svdCov(PointCloudT::Ptr input, PointT seed, vector<int> &othersIdx, Vector3
 //                           to_string(n(0))   + " " + to_string(n(1))   + " " + to_string(n(2)));
 }
 
-void estimateRigidTransform(const vector<Match>& matches, const vector<Desp>& srcDesps, const vector<Desp>& tarDesps, Matrix4d & T, float &err) {
-
-    //cout << "[estimateRigidTransform]" << endl;
-    auto start = std::chrono::steady_clock::now();
-    int ovNum = tarDesps.size() * Config<float>("overlapRatio");
-    vector<Eigen::Vector3d> src;
-    vector<Eigen::Vector3d> tar;
-
-    for (auto& match: matches) {
-        PointT srcP = match.src->seed;
-        PointT tarP = match.tar->seed;
-        src.push_back( Eigen::Vector3d(srcP.x, srcP.y, srcP.z));
-        tar.push_back( Eigen::Vector3d(tarP.x, tarP.y, tarP.z));
-    }
-
-    float ransacThr = Config<float>("GridStep") * Config<float>("GridStep");
-    pair<Eigen::Matrix4d, int> estRes = Estimator::RANSAC(src, tar, ransacThr);
-    if (estRes.second < 3) {
-        err = INT_MAX;
-        T = Eigen::Matrix4d::Identity();
-        return;
-    }
-    Eigen::Matrix4d estimateT = estRes.first;
-    T = estimateT;
-
-
-    vector<Eigen::Vector3d> transSrc;
-    for (auto& desp : srcDesps) {
-        PointT src = desp.seed;
-        Eigen::Vector4d tmp = estimateT * Eigen::Vector4d(src.x, src.y, src.z, 1);
-        transSrc.push_back(Eigen::Vector3d(tmp(0), tmp(1), tmp(2)));
-    }
-
-    vector<Eigen::Vector3d> tar_v;
-    for (auto& desp : tarDesps) {
-        PointT src = desp.seed;
-        tar_v.push_back(Eigen::Vector3d(src.x, src.y, src.z));
-    }
-    unordered_map<int,pair<int,float>> map;
-    flannSearch(transSrc, tar_v, map);
-
-    priority_queue<float> pq;
-    for (auto& it : map) {
-        pq.push(it.second.second);
-        if (pq.size() > ovNum) pq.pop();
-    }
-    err = 0;
-    while(!pq.empty()) {
-        err += pq.top();
-        pq.pop();
-    }
-}
-
-void estimateRigidTransform(const vector<Eigen::Vector3d>& src, const vector<Eigen::Vector3d>& tar, Matrix4d & T, float &err) {
-
-    auto start = std::chrono::steady_clock::now();
-    int ovNum = tar.size() * Config<float>("overlapRatio");
-
-
-    float ransacThr = Config<float>("GridStep") * Config<float>("GridStep");
-    pair<Eigen::Matrix4d, int> estRes = Estimator::RANSAC(src, tar, ransacThr);
-    if (estRes.second < 3) {
-        err = INT_MAX;
-        T = Eigen::Matrix4d::Identity();
-        return;
-    }
-    Eigen::Matrix4d estimateT = estRes.first;
-    T = estimateT;
-
-
-    vector<Eigen::Vector3d> transSrc;
-    for (auto& p : src) {
-        Eigen::Vector4d tmp = estimateT * Eigen::Vector4d(p(0), p(1), p(2), 1);
-        transSrc.push_back(Eigen::Vector3d(tmp(0), tmp(1), tmp(2)));
-    }
-
-    unordered_map<int,pair<int,float>> map;
-    flannSearch(transSrc, tar, map);
-
-    priority_queue<float> pq;
-    for (auto& it : map) {
-        pq.push(it.second.second);
-        if (pq.size() > ovNum) pq.pop();
-    }
-    err = 0;
-    while(!pq.empty()) {
-        err += pq.top();
-        pq.pop();
-    }
-}
-
 Eigen::Matrix4d matching(vector<Desp>& srcDesps, vector<Desp>& tarDesps, vector<Desp>& srcFDesps, vector<Desp>& tarFDesps) {
     cout << "[matching]" << endl;
-    unordered_map<int,pair<int,float>> map;
+    int ovNum = tarDesps.size() * Config<float>("overlapRatio");
+    float ransacThr = Config<float>("GridStep") * Config<float>("GridStep");
 
-    flannSearch(srcFDesps, tarFDesps, map);
+    // 1. Initial matching of Desp
+    unordered_map<int,pair<int,float>> map;
+    FlannSearch::flannSearch(srcFDesps, tarFDesps, map);
 
     float minErr = INT_MAX;
     Eigen::Matrix4d bestT = Eigen::Matrix4d::Identity();
-
 
     // pair< srcIdx, tarIdx >
     vector<pair<int,int>> rec;
@@ -354,6 +265,7 @@ Eigen::Matrix4d matching(vector<Desp>& srcDesps, vector<Desp>& tarDesps, vector<
         viewer.spin();
     }
 
+    // 2. aggregating matching
     float seedIdx = 0;
     int filteredNum = 0;
     //#pragma omp parallel for
@@ -371,7 +283,7 @@ Eigen::Matrix4d matching(vector<Desp>& srcDesps, vector<Desp>& tarDesps, vector<
         if (aggMatches.size() > 10) {
            Eigen::Matrix4d thisT = Eigen::Matrix4d::Identity();
            float thisErr = INT_MAX;
-           estimateRigidTransform(aggMatches,srcDesps, tarDesps, thisT, thisErr);
+           Estimator::estimateRigidTransform(aggMatches,srcDesps, tarDesps, thisT, thisErr, ovNum, ransacThr);
            //TimeEstimateRigid = timeElapsed(start);
             //#pragma omp critical
             {
@@ -420,9 +332,10 @@ Eigen::Matrix4d matching(vector<Desp>& srcDesps, vector<Desp>& tarDesps, vector<
 
 void aggMatching(Desp& src, vector<Desp>& srcSeeds, Desp& tar, vector<Desp>& tarSeeds, vector<Match>& matches) {
     int n_src = srcSeeds.size();
-    int n_tar = tarSeeds.size();
     float thetaThr = Config<float>("thetaThr");
     float distThr  = Config<float>("distThr");
+    float gridStep = Config<float>("GridStep");
+    int layerNum = src.N.size();
     vector<float> srcDists;
     vector<float> tarDists;
     PointT s = src.seed;
@@ -441,11 +354,10 @@ void aggMatching(Desp& src, vector<Desp>& srcSeeds, Desp& tar, vector<Desp>& tar
 
 
     // for each src seed, check each tar seed which dist diff is less than gird/2
-
     vector<vector<int>> srcNearDist(n_src,  vector<int>());
-    float gridStep = Config<float>("GridStep");
-    flannSearch(tarDists, srcDists, gridStep/2, srcNearDist);
+    FlannSearch::flannSearch(tarDists, srcDists, gridStep/2, srcNearDist);
 
+    // compute the normal difference
     vector<vector<float>> seedAngle;
     vector<vector<float>> tarAngle;
     computeNormalDiff(src, srcSeeds, seedAngle);
@@ -458,9 +370,7 @@ void aggMatching(Desp& src, vector<Desp>& srcSeeds, Desp& tar, vector<Desp>& tar
     // reject outlier
 
 
-   // auto start = std::chrono::steady_clock::now();
     for (int i = 0; i < n_src; ++i) {
-
         if (srcNearDist[i].size() == 0) continue;
         Desp srcSeed = srcSeeds[i];
 
@@ -473,19 +383,18 @@ void aggMatching(Desp& src, vector<Desp>& srcSeeds, Desp& tar, vector<Desp>& tar
             vector<float> t_angle = tarAngle[idx];
             int valid = 0;
             float totalDiff = 0;
-            for (int j = 0; j < seedAngle[0].size(); ++j) {
+            for (int j = 0; j < layerNum; ++j) {
                 float diff = abs(s_angle[j] - t_angle[j]);
                 if ( diff < thetaThr) valid++;
                 totalDiff += diff;
             }
             // all smaller than thed
-            totalDiff = valid == seedAngle[0].size() ? (totalDiff/seedAngle[0].size())  : INT_MAX;
+            totalDiff = valid == layerNum ? (totalDiff/layerNum)  : INT_MAX;
             thetaDiff.push(make_pair(idx,totalDiff));
-            if (valid == seedAngle[0].size()) idxValid++;
+            if (valid == layerNum) idxValid++;
         }
 
         if (thetaDiff.top().second < thetaThr) {
-
             int tarIdx = thetaDiff.top().first;
             float despDist = computeDespDist (srcSeeds[i], tarSeeds[tarIdx]);
             if (despDist < distThr) {
@@ -495,7 +404,6 @@ void aggMatching(Desp& src, vector<Desp>& srcSeeds, Desp& tar, vector<Desp>& tar
             }
         }
     }
-    //cout << " reject outliers costs " << timeElapsed(start) << endl;
 
 }
 
@@ -528,134 +436,16 @@ void computeNormalDiff(Desp& seed, vector<Desp>& allDesps, vector<vector<float>>
 
 }
 
-void flannSearch(const vector<Desp>& srcDesps, const vector<Desp>& tarDesps, unordered_map<int,pair<int,float>>& map){
-    int layer = srcDesps[0].S.size();
-    int nn = layer*3;
-    int dataSz = srcDesps.size();
-    int querySz = tarDesps.size();
-    flann::Matrix<float> dataset (new float[nn*dataSz], dataSz, nn);
-    flann::Matrix<float> query(new float[nn*querySz], querySz, nn);
-
-    for ( int i = 0; i < dataSz; ++i) {
-        vector<Vector3f> S = srcDesps[i].S;
-        for (int j = 0; j < nn; ++j ) {
-            dataset[i][j] = S[j/3](j%3);
-            //cout << S[j/3](j%3) << " ";
-        }
-        //cout << "\n";
-
-    }
-    //abort();
-    for ( int i = 0; i < querySz; ++i) {
-        vector<Vector3f> S = tarDesps[i].S;
-        for (int j = 0; j < nn; ++j ) {
-            query[i][j] = S[j/3](j%3);
-        }
-
-    }
-
-    flann::Matrix<int> indices(new int[query.rows*nn], query.rows, nn);
-    flann::Matrix<float> dists(new float[query.rows*nn], query.rows, nn);
-
-    // construct an randomized kd-tree index using 4 kd-trees
-    flann::Index<flann::L2<float> > index(dataset, flann::KDTreeIndexParams(8));
-    index.buildIndex();
-
-    // do a knn search, using 128 checks
-    index.knnSearch(query, indices, dists, nn, flann::SearchParams(64));
-
-    for(int i=0;i<indices.rows;i++){
-        map[i] = make_pair(indices[i][0], dists[i][0]);
-    }
-
-    delete[] dataset.ptr();
-    delete[] query.ptr();
-    delete[] indices.ptr();
-    delete[] dists.ptr();
-}
-
-void flannSearch(const vector<Eigen::Vector3d>& srcDesps, const vector<Eigen::Vector3d>& tarDesps, unordered_map<int,pair<int,float>>& map){
-    int nn = 3;
-    int dataSz = srcDesps.size();
-    int querySz = tarDesps.size();
-    flann::Matrix<float> dataset (new float[nn*dataSz], dataSz, nn);
-    flann::Matrix<float> query(new float[nn*querySz], querySz, nn);
-
-    for ( int i = 0; i < dataSz; ++i) {;
-        for (int j = 0; j < nn; ++j ) {
-            dataset[i][j] = srcDesps[i](j);
-        }
-
-    }
-    for ( int i = 0; i < querySz; ++i) {;
-        for (int j = 0; j < nn; ++j ) {
-            query[i][j] = tarDesps[i](j);
-        }
-
-    }
-
-    flann::Matrix<int> indices(new int[query.rows*nn], query.rows, nn);
-    flann::Matrix<float> dists(new float[query.rows*nn], query.rows, nn);
-
-
-    // construct an randomized kd-tree index using 4 kd-trees
-    flann::Index<flann::L2<float> > index(dataset, flann::KDTreeIndexParams(8));
-    index.buildIndex();
-
-    // do a knn search, using 128 checks
-    index.knnSearch(query, indices, dists, nn, flann::SearchParams(64));
-
-    for(int i=0;i<indices.rows;i++){
-        map[i] = make_pair(indices[i][0], dists[i][0]);
-    }
-
-    delete[] dataset.ptr();
-    delete[] query.ptr();
-    delete[] indices.ptr();
-    delete[] dists.ptr();
-}
-
-void flannSearch(const vector<float>& src, const vector<float>& tar, float radius, vector<vector<int>>& map){
-    assert(tar.size() == map.size());
-    PointCloudT::Ptr srcCloud(new PointCloudT);
-    PointCloudT::Ptr tarCloud(new PointCloudT);
-    for (auto d: src) {
-        PointT p;
-        p.x = d; p.y = 0; p.z = 0;
-        srcCloud->push_back(p);
-    }
-    for (auto d: tar) {
-        PointT p;
-        p.x = d; p.y = 0; p.z = 0;
-        tarCloud->push_back(p);
-    }
-
-    KdTreeFLANN<PointT> kdtree;
-    kdtree.setInputCloud (srcCloud);
-    vector<int> validIndexes;
-
-    // filter the seeds
-    for (int i = 0; i < tarCloud->size(); ++i) {
-        PointT searchPoint = tarCloud->points[i];
-        vector<int> pointIdxRadiusSearch;
-        vector<float> pointRadiusSquaredDistance;
-        if ( kdtree.radiusSearch (searchPoint, radius, pointIdxRadiusSearch, pointRadiusSquaredDistance) ) {
-            for (auto& idx : pointIdxRadiusSearch) {
-                map[i].push_back(idx);
-            }
-        }
-    }
-}
-
 void trimmedICP(const vector<Eigen::Vector3d> &tarEst, const vector<Eigen::Vector3d> &tarData, float overlapRatio){
     int ovNum = overlapRatio * tarData.size();
+    float ransacThr = Config<float>("GridStep") * Config<float>("GridStep");
     typedef pair<pair<int,int>, float> PAIR;
     struct Compare {
         bool operator() (PAIR& p1, PAIR& p2) {return p1.second < p2.second;}
     };
 
     unordered_map<int,pair<int,float>> map;
-    flannSearch(tarEst, tarData, map);
+    FlannSearch::flannSearch(tarEst, tarData, map);
     priority_queue<PAIR, vector<PAIR>, Compare> pq;
     for (auto& it:map) {
         pq.push(make_pair( make_pair(it.first,it.second.first), it.second.second));
@@ -684,7 +474,7 @@ void trimmedICP(const vector<Eigen::Vector3d> &tarEst, const vector<Eigen::Vecto
         iter++;
         Eigen::Matrix4d T;
         float err;
-        estimateRigidTransform(match_tarData, match_srcData, T, err);
+        Estimator::estimateRigidTransform(match_tarData, match_srcData, T, err, ovNum, ransacThr);
         vector<Eigen::Vector3d> tar_hat;
         for (auto& src : match_srcData) {
             Eigen::Vector4d tmp = T * Eigen::Vector4d(src(0),src(1),src(2),1);
@@ -693,7 +483,7 @@ void trimmedICP(const vector<Eigen::Vector3d> &tarEst, const vector<Eigen::Vecto
 
         // search nearest point
         unordered_map<int,pair<int,float>> map;
-        flannSearch(tar_hat, match_tarData, map);
+        FlannSearch::flannSearch(tar_hat, match_tarData, map);
         priority_queue<PAIR, vector<PAIR>, Compare> pq;
         for (auto& it:map) {
             pq.push(make_pair( make_pair(it.first,it.second.first), it.second.second));
@@ -719,19 +509,6 @@ void trimmedICP(const vector<Eigen::Vector3d> &tarEst, const vector<Eigen::Vecto
 
     cout << "[trimmed-icp] " << iter << endl;
 
-}
-
-void computeColorFeature(PointCloudT::Ptr seeds, PointCloudT::Ptr source){
-    cout << "compute color feature" << endl;
-    ColorFeature cf(seeds, source, Config<float>("ColorFeature","radius"));
-    PointCloudT::Ptr outputMean(new PointCloudT);
-    cf.compute();
-    SimpleView viewer1("Color feature",1,4);
-    viewer1.addPointCloud(seeds,1,1);
-    viewer1.addPointCloud(cf.meanOutput,1,2);
-    viewer1.addPointCloud(cf.stdvOutput,1,3);
-    viewer1.addPointCloud(cf.skewOutput,1,4);
-    cout << outputMean->size() << endl;
 }
 
 bool isFiltered_Color(Desp& d1, Desp& d2){
